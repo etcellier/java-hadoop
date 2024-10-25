@@ -1,7 +1,11 @@
 package com.cellier.etienne.controller;
 
+import com.cellier.etienne.dto.FileProcessingResponse;
+import com.cellier.etienne.dto.FileUploadRequest;
+import com.cellier.etienne.services.HadoopService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -14,6 +18,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api")
@@ -24,34 +29,20 @@ public class FileController {
     @Value("${file.upload.directory:uploads}")
     private String uploadDirectory;
 
-    public static class FileUploadRequest {
-        private String content;
-        private String fileName; // Ajout du nom du fichier
+    private final HadoopService hadoopService;
 
-        public String getContent() {
-            return content;
-        }
-
-        public void setContent(String content) {
-            this.content = content;
-        }
-
-        public String getFileName() {
-            return fileName;
-        }
-
-        public void setFileName(String fileName) {
-            this.fileName = fileName;
-        }
+    @Autowired
+    public FileController(HadoopService hadoopService) {
+        this.hadoopService = hadoopService;
     }
 
     @PostMapping("/upload")
-    public ResponseEntity<Map<String, String>> uploadFile(@RequestBody FileUploadRequest request) {
-        logger.info("Received upload request");
+    public ResponseEntity<?> uploadFile(@RequestBody FileUploadRequest request) {
+        logger.info("Received upload request for file: {}", request.getFileName());
 
         try {
-            if (request == null || request.getContent() == null) {
-                throw new IllegalArgumentException("Invalid request: content is null");
+            if (request.getContent() == null || request.getFileName() == null) {
+                throw new IllegalArgumentException("Invalid request: content or fileName is null");
             }
 
             Path uploadPath = Paths.get(uploadDirectory);
@@ -62,27 +53,49 @@ public class FileController {
 
             String fileName = generateFileName(request.getFileName());
             Path filePath = uploadPath.resolve(fileName);
-
             Files.writeString(filePath, request.getContent());
             logger.info("File saved successfully: {}", filePath);
 
+            CompletableFuture<String> hadoopFuture = hadoopService.processFileWithHadoop(filePath);
+
             Map<String, String> response = new HashMap<>();
-            response.put("message", "File uploaded successfully");
+            response.put("status", "processing");
+            response.put("message", "File uploaded and processing started");
             response.put("fileName", fileName);
             response.put("path", filePath.toString());
+
+            hadoopFuture.thenAccept(result -> logger.info("Hadoop processing completed for file: {}", fileName)).exceptionally(throwable -> {
+                logger.error("Error in Hadoop processing", throwable);
+                return null;
+            });
 
             return ResponseEntity.ok(response);
 
         } catch (IOException e) {
             logger.error("Error writing file", e);
-            Map<String, String> error = new HashMap<>();
-            error.put("error", "Failed to save file: " + e.getMessage());
-            return ResponseEntity.internalServerError().body(error);
+            return ResponseEntity.internalServerError().body(
+                    new FileProcessingResponse("error", "Failed to save file: " + e.getMessage())
+            );
         } catch (Exception e) {
             logger.error("Error processing upload", e);
-            Map<String, String> error = new HashMap<>();
-            error.put("error", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
+            return ResponseEntity.badRequest().body(
+                    new FileProcessingResponse("error", e.getMessage())
+            );
+        }
+    }
+
+    @GetMapping("/wordcount/{fileName}")
+    public ResponseEntity<?> getWordCountResult(@PathVariable String fileName) {
+        try {
+            return ResponseEntity.ok(Map.of(
+                    "status", "processing",
+                    "fileName", fileName
+            ));
+        } catch (Exception e) {
+            logger.error("Error retrieving word count result", e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Failed to retrieve results: " + e.getMessage()
+            ));
         }
     }
 

@@ -24,3 +24,5 @@ front/out/
 # Fichiers système
 .DS_Store
 *.log
+
+uploads
