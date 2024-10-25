@@ -33,16 +33,13 @@ public class HadoopService {
                 String hadoopInputFile = hadoopInputPath + "/" + fileName;
                 String wslPath = "/mnt/" + localFilePath.toString().replace("\\", "/").toLowerCase().replace(":", "");
 
-                String command = String.join(" && ",
-                        "export PATH=$PATH:" + hadoopHome + "/bin",
-                        hadoopHome + "/bin/hdfs dfs -copyFromLocal " + wslPath + " " + hadoopInputFile,
-                        hadoopHome + "/bin/hdfs dfs -rm -r " + hadoopOutputPath,
-                        hadoopHome + "/bin/hadoop jar " + hadoopJarPath + " wordcount " + hadoopInputFile + " " + hadoopOutputPath,
-                        hadoopHome + "/bin/hdfs dfs -cat " + hadoopOutputPath + "/part-r-00000",
-                        hadoopHome + "/bin/hdfs dfs -rm " + hadoopInputFile
-                );
+                String[] command = {
+                        "wsl", hadoopHome + "/bin/hdfs", "dfs", "-copyFromLocal", "-f", wslPath, hadoopInputFile,
+                        "&&", hadoopHome + "/bin/hadoop", "jar", hadoopJarPath, "wordcount", hadoopInputFile, hadoopOutputPath,
+                        "&&", hadoopHome + "/bin/hdfs", "dfs", "-copyToLocal", "-f", hadoopOutputPath + "/part-r-00000", "output/result.txt"
+                };
 
-                return executeCommand(new String[] {"wsl", "sh", "-c", command});
+                return executeCommand(command);
             } catch (Exception e) {
                 logger.error("Error processing file with Hadoop", e);
                 throw new RuntimeException("Failed to process file with Hadoop: " + e.getMessage());
